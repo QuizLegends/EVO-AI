@@ -1,9 +1,17 @@
-
 """
 EVO AI - Training Engine
-Version: 0.1.0
+Version: 0.2.0
 
 Trains the neural model from randomly initialized weights.
+
+Features:
+- Independent programming examples.
+- Variable-length batch support.
+- Padding ignored during loss calculation.
+- Gradient accumulation.
+- Optional CUDA mixed precision.
+- Token-weighted validation loss.
+- Reproducible train/validation split.
 """
 
 import argparse
@@ -11,11 +19,16 @@ import random
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
+
 from torch.utils.data import DataLoader, random_split
 
 from brain.model import EVOConfig, EVONeuralCore
 from brain.tokenizer import EVOTokenizer
 from training.dataset import EVODataset
+
+
+IGNORE_INDEX = -100
 
 
 def set_seed(seed):
@@ -26,6 +39,42 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
+def collate_examples(batch):
+    """
+    Pads variable-length examples.
+
+    Padding targets use IGNORE_INDEX so they do not
+    contribute to the training loss.
+    """
+
+    max_length = max(
+        len(input_ids)
+        for input_ids, _ in batch
+    )
+
+    batch_size = len(batch)
+
+    input_ids_batch = torch.zeros(
+        (batch_size, max_length),
+        dtype=torch.long
+    )
+
+    targets_batch = torch.full(
+        (batch_size, max_length),
+        IGNORE_INDEX,
+        dtype=torch.long
+    )
+
+    for index, (input_ids, targets) in enumerate(batch):
+
+        length = len(input_ids)
+
+        input_ids_batch[index, :length] = input_ids
+        targets_batch[index, :length] = targets
+
+    return input_ids_batch, targets_batch
+
+
 def save_checkpoint(
     model,
     optimizer,
@@ -34,7 +83,9 @@ def save_checkpoint(
     config,
     output_path
 ):
+
     output_path = Path(output_path)
+
     output_path.parent.mkdir(
         parents=True,
         exist_ok=True
@@ -52,14 +103,79 @@ def save_checkpoint(
     )
 
 
+def evaluate(
+    model,
+    loader,
+    device,
+    use_amp
+):
+    """
+    Calculates validation loss weighted by valid tokens.
+    """
+
+    model.eval()
+
+    total_loss = 0.0
+    total_tokens = 0
+
+    with torch.no_grad():
+
+        for input_ids, targets in loader:
+
+            input_ids = input_ids.to(device)
+            targets = targets.to(device)
+
+            valid_tokens = (
+                targets != IGNORE_INDEX
+            ).sum().item()
+
+            with torch.amp.autocast(
+                device_type=device.type,
+                dtype=torch.float16,
+                enabled=use_amp
+            ):
+
+                logits, _ = model(
+                    input_ids,
+                    targets
+                )
+
+                loss_sum = F.cross_entropy(
+                    logits.reshape(
+                        -1,
+                        model.config.vocab_size
+                    ),
+                    targets.reshape(-1),
+                    ignore_index=IGNORE_INDEX,
+                    reduction="sum"
+                )
+
+            total_loss += loss_sum.item()
+            total_tokens += valid_tokens
+
+    if total_tokens == 0:
+        raise ValueError(
+            "Validation dataset contains no valid tokens."
+        )
+
+    return total_loss / total_tokens
+
+
 def train(args):
+
     set_seed(args.seed)
 
     device = torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
 
-    print(f"EVO AI device: {device}")
+    use_amp = (
+        device.type == "cuda"
+        and not args.no_mixed_precision
+    )
+
+    print("EVO AI device:", device)
+    print("Mixed precision:", use_amp)
 
     tokenizer = EVOTokenizer()
 
@@ -80,7 +196,7 @@ def train(args):
 
     if len(dataset) < 2:
         raise ValueError(
-            "Dataset is too small. Add more training text."
+            "Dataset needs at least two examples."
         )
 
     validation_size = max(
@@ -88,7 +204,14 @@ def train(args):
         int(len(dataset) * args.validation_split)
     )
 
-    training_size = len(dataset) - validation_size
+    training_size = (
+        len(dataset) - validation_size
+    )
+
+    if training_size < 1:
+        raise ValueError(
+            "Training dataset is too small."
+        )
 
     training_data, validation_data = random_split(
         dataset,
@@ -99,12 +222,17 @@ def train(args):
     train_loader = DataLoader(
         training_data,
         batch_size=args.batch_size,
-        shuffle=True
+        shuffle=True,
+        collate_fn=collate_examples,
+        pin_memory=(device.type == "cuda")
     )
 
     validation_loader = DataLoader(
         validation_data,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        shuffle=False,
+        collate_fn=collate_examples,
+        pin_memory=(device.type == "cuda")
     )
 
     model = EVONeuralCore(config).to(device)
@@ -114,64 +242,121 @@ def train(args):
         lr=args.learning_rate
     )
 
-    print(
-        f"Parameters: {model.parameter_count:,}"
+    scaler = torch.amp.GradScaler(
+        "cuda",
+        enabled=use_amp
     )
+
+    print("Parameters:", f"{model.parameter_count:,}")
+    print("Total examples:", len(dataset))
+    print("Training examples:", len(training_data))
+    print("Validation examples:", len(validation_data))
+    print("Batch size:", args.batch_size)
     print(
-        f"Training examples: {len(training_data)}"
+        "Gradient accumulation:",
+        args.gradient_accumulation_steps
     )
-    print(
-        f"Validation examples: {len(validation_data)}"
-    )
+    print("Context:", args.block_size)
 
     for epoch in range(1, args.epochs + 1):
 
         model.train()
+
+        optimizer.zero_grad(set_to_none=True)
+
         total_train_loss = 0.0
+        total_train_tokens = 0
 
-        for input_ids, targets in train_loader:
-            input_ids = input_ids.to(device)
-            targets = targets.to(device)
+        for step, (input_ids, targets) in enumerate(
+            train_loader
+        ):
 
-            optimizer.zero_grad(set_to_none=True)
-
-            _, loss = model(
-                input_ids,
-                targets
+            input_ids = input_ids.to(
+                device,
+                non_blocking=True
             )
 
-            loss.backward()
-
-            torch.nn.utils.clip_grad_norm_(
-                model.parameters(),
-                max_norm=1.0
+            targets = targets.to(
+                device,
+                non_blocking=True
             )
 
-            optimizer.step()
+            valid_tokens = (
+                targets != IGNORE_INDEX
+            ).sum().item()
 
-            total_train_loss += loss.item()
+            if valid_tokens == 0:
+                continue
 
-        average_train_loss = (
-            total_train_loss / len(train_loader)
-        )
+            group_start = (
+                step // args.gradient_accumulation_steps
+            ) * args.gradient_accumulation_steps
 
-        model.eval()
-        total_validation_loss = 0.0
+            group_size = min(
+                args.gradient_accumulation_steps,
+                len(train_loader) - group_start
+            )
 
-        with torch.no_grad():
-            for input_ids, targets in validation_loader:
-                input_ids = input_ids.to(device)
-                targets = targets.to(device)
+            with torch.amp.autocast(
+                device_type=device.type,
+                dtype=torch.float16,
+                enabled=use_amp
+            ):
 
                 _, loss = model(
                     input_ids,
                     targets
                 )
 
-                total_validation_loss += loss.item()
+                scaled_loss = loss / group_size
 
-        average_validation_loss = (
-            total_validation_loss / len(validation_loader)
+            scaler.scale(scaled_loss).backward()
+
+            total_train_loss += (
+                loss.detach().item() * valid_tokens
+            )
+
+            total_train_tokens += valid_tokens
+
+            is_accumulation_step = (
+                (step + 1)
+                % args.gradient_accumulation_steps == 0
+            )
+
+            is_last_step = (
+                step + 1 == len(train_loader)
+            )
+
+            if is_accumulation_step or is_last_step:
+
+                scaler.unscale_(optimizer)
+
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    max_norm=1.0
+                )
+
+                scaler.step(optimizer)
+                scaler.update()
+
+                optimizer.zero_grad(
+                    set_to_none=True
+                )
+
+        if total_train_tokens == 0:
+            raise ValueError(
+                "Training dataset contains no valid tokens."
+            )
+
+        average_train_loss = (
+            total_train_loss / total_train_tokens
+        )
+
+        average_validation_loss = evaluate(
+            model,
+            validation_loader,
+            device,
+            use_amp
         )
 
         print(
@@ -190,12 +375,13 @@ def train(args):
         )
 
     print("Training completed.")
-    print(f"Checkpoint saved to: {args.output}")
+    print("Checkpoint saved to:", args.output)
 
 
 def main():
+
     parser = argparse.ArgumentParser(
-        description="Train EVO AI from scratch"
+        description="Train EVO AI from scratch."
     )
 
     parser.add_argument(
@@ -207,30 +393,103 @@ def main():
     parser.add_argument(
         "--output",
         type=str,
-        default="checkpoints/evo_v0.1.pt"
+        default="checkpoints/evo_v0.2.pt"
     )
 
-    parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--block-size", type=int, default=128)
-    parser.add_argument("--d-model", type=int, default=128)
-    parser.add_argument("--n-heads", type=int, default=4)
-    parser.add_argument("--n-layers", type=int, default=4)
-    parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument("--validation-split", type=float, default=0.1)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=5
+    )
+
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1
+    )
+
+    parser.add_argument(
+        "--block-size",
+        type=int,
+        default=8192
+    )
+
+    parser.add_argument(
+        "--gradient-accumulation-steps",
+        type=int,
+        default=4
+    )
+
+    parser.add_argument(
+        "--no-mixed-precision",
+        action="store_true"
+    )
+
+    parser.add_argument(
+        "--d-model",
+        type=int,
+        default=128
+    )
+
+    parser.add_argument(
+        "--n-heads",
+        type=int,
+        default=4
+    )
+
+    parser.add_argument(
+        "--n-layers",
+        type=int,
+        default=4
+    )
+
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=0.1
+    )
+
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=3e-4
+    )
+
+    parser.add_argument(
+        "--validation-split",
+        type=float,
+        default=0.1
+    )
+
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42
+    )
 
     args = parser.parse_args()
 
-    if args.epochs < 1 or args.batch_size < 1:
-        parser.error("epochs and batch-size must be positive")
+    if args.epochs < 1:
+        parser.error("epochs must be positive")
+
+    if args.batch_size < 1:
+        parser.error("batch-size must be positive")
+
+    if args.gradient_accumulation_steps < 1:
+        parser.error(
+            "gradient-accumulation-steps must be positive"
+        )
 
     if not 0 < args.validation_split < 1:
-        parser.error("validation-split must be between 0 and 1")
+        parser.error(
+            "validation-split must be between 0 and 1"
+        )
 
-    if args.block_size < 1:
-        parser.error("block-size must be positive")
+    if args.block_size < 2:
+        parser.error("block-size must be at least 2")
+
+    if args.learning_rate <= 0:
+        parser.error("learning-rate must be positive")
 
     train(args)
 
