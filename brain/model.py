@@ -1,7 +1,7 @@
 
 """
 EVO AI - Neural Core
-Version: 0.1.0
+Version: 0.2.0
 
 Transformer language model initialized from scratch.
 No pretrained weights are loaded.
@@ -12,6 +12,9 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+IGNORE_INDEX = -100
 
 
 @dataclass
@@ -62,7 +65,7 @@ class EVOBlock(nn.Module):
 
         self.dropout = nn.Dropout(config.dropout)
 
-    def forward(self, x):
+    def forward(self, x, padding_mask=None):
         seq_len = x.size(1)
 
         causal_mask = torch.triu(
@@ -82,6 +85,7 @@ class EVOBlock(nn.Module):
             normalized,
             normalized,
             attn_mask=causal_mask,
+            key_padding_mask=padding_mask,
             need_weights=False
         )
 
@@ -156,13 +160,18 @@ class EVONeuralCore(nn.Module):
             nn.init.zeros_(module.bias)
 
     def forward(self, input_ids, targets=None):
-
         batch_size, seq_len = input_ids.shape
 
         if seq_len > self.config.max_seq_len:
             raise ValueError(
                 "Sequence exceeds max_seq_len"
             )
+
+        padding_mask = input_ids.eq(0)
+
+        # The first position must always remain available
+        # to prevent attention rows with every key masked.
+        padding_mask[:, 0] = False
 
         positions = torch.arange(
             seq_len,
@@ -175,7 +184,10 @@ class EVONeuralCore(nn.Module):
         )
 
         for block in self.blocks:
-            x = block(x)
+            x = block(
+                x,
+                padding_mask=padding_mask
+            )
 
         x = self.final_norm(x)
 
@@ -185,8 +197,12 @@ class EVONeuralCore(nn.Module):
 
         if targets is not None:
             loss = F.cross_entropy(
-                logits.reshape(-1, self.config.vocab_size),
-                targets.reshape(-1)
+                logits.reshape(
+                    -1,
+                    self.config.vocab_size
+                ),
+                targets.reshape(-1),
+                ignore_index=IGNORE_INDEX
             )
 
         return logits, loss
@@ -199,7 +215,6 @@ class EVONeuralCore(nn.Module):
         temperature=1.0,
         top_k=None
     ):
-
         if temperature <= 0:
             raise ValueError("Temperature must be positive")
 
