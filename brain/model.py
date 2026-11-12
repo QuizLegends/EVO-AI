@@ -1,4 +1,3 @@
-
 """
 EVO AI - Neural Core
 Version: 0.2.0
@@ -159,19 +158,47 @@ class EVONeuralCore(nn.Module):
             nn.init.ones_(module.weight)
             nn.init.zeros_(module.bias)
 
-    def forward(self, input_ids, targets=None):
+    def forward(
+        self,
+        input_ids,
+        targets=None,
+        padding_mask=None
+    ):
         batch_size, seq_len = input_ids.shape
+
+        if seq_len < 1:
+            raise ValueError("Input sequence cannot be empty")
 
         if seq_len > self.config.max_seq_len:
             raise ValueError(
                 "Sequence exceeds max_seq_len"
             )
 
-        padding_mask = input_ids.eq(0)
+        # Use the mask supplied by the training pipeline.
+        # During generation, derive it automatically.
+        if padding_mask is None:
+            # Inference inputs contain real tokens, including byte zero.
+            # Padding must be identified through an explicit mask.
+            padding_mask = torch.zeros_like(
+                input_ids,
+                dtype=torch.bool
+            )
+        else:
+            if padding_mask.shape != input_ids.shape:
+                raise ValueError(
+                    "padding_mask must have the same shape as input_ids"
+                )
 
-        # The first position must always remain available
-        # to prevent attention rows with every key masked.
-        padding_mask[:, 0] = False
+            padding_mask = padding_mask.to(
+                device=input_ids.device,
+                dtype=torch.bool
+            )
+
+        # The first position must always be available.
+        if padding_mask[:, 0].any():
+            raise ValueError(
+                "The first token of each sequence cannot be padding"
+            )
 
         positions = torch.arange(
             seq_len,

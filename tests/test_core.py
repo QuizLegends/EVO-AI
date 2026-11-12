@@ -116,19 +116,22 @@ class TestDataset(unittest.TestCase):
             dataset = EVODataset(
                 path,
                 tokenizer,
-                block_size=4
+                block_size=25
             )
 
             inputs, targets = dataset[0]
 
+            self.assertEqual(inputs.shape, (25,))
+            self.assertEqual(targets.shape, (25,))
+
             self.assertEqual(
                 inputs.tolist(),
-                [65, 66, 67, 68]
+                list(range(65, 90))
             )
 
             self.assertEqual(
                 targets.tolist(),
-                [66, 67, 68, 69]
+                list(range(66, 91))
             )
 
 

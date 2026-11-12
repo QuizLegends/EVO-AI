@@ -114,22 +114,15 @@ class TestDataset(unittest.TestCase):
             dataset = EVODataset(
                 file_path=data_path,
                 tokenizer=EVOTokenizer(),
-                block_size=4
+                block_size=15
             )
 
-            self.assertGreater(len(dataset), 0)
+            self.assertEqual(len(dataset), 1)
 
             inputs, targets = dataset[0]
 
-            self.assertEqual(
-                inputs.shape,
-                (4,)
-            )
-
-            self.assertEqual(
-                targets.shape,
-                (4,)
-            )
+            self.assertEqual(inputs.shape, (15,))
+            self.assertEqual(targets.shape, (15,))
 
             self.assertEqual(
                 inputs[1:].tolist(),

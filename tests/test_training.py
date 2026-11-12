@@ -1,4 +1,3 @@
-
 """
 EVO AI - Training Integration Test
 Version: 0.2.0
@@ -86,9 +85,7 @@ def multiply(a, b):
 
             train(args)
 
-            self.assertTrue(
-                checkpoint_path.is_file()
-            )
+            self.assertTrue(checkpoint_path.is_file())
 
             checkpoint = torch.load(
                 checkpoint_path,
@@ -96,22 +93,14 @@ def multiply(a, b):
                 weights_only=True
             )
 
-            self.assertEqual(
-                checkpoint["epoch"],
-                1
-            )
+            self.assertEqual(checkpoint["epoch"], 1)
 
-            trained_weights = checkpoint[
-                "model_state_dict"
-            ]
+            trained_weights = checkpoint["model_state_dict"]
 
             changed_parameters = [
                 name
                 for name, initial in initial_weights.items()
-                if not torch.equal(
-                    initial,
-                    trained_weights[name]
-                )
+                if not torch.equal(initial, trained_weights[name])
             ]
 
             self.assertGreater(
@@ -121,12 +110,9 @@ def multiply(a, b):
             )
 
             self.assertTrue(
-                torch.isfinite(
-                    torch.tensor(checkpoint["loss"])
-                ).item()
+                torch.isfinite(torch.tensor(checkpoint["loss"])).item()
             )
 
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-
