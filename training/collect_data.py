@@ -1,10 +1,16 @@
 
 """
 EVO AI - Programming Dataset Collector
-Version: 0.1.0
+Version: 0.2.0
 
 Downloads and filters authorized programming datasets
 from Hugging Face using streaming mode.
+
+Features:
+- Verifies the real dataset license through Hugging Face metadata.
+- Rejects datasets with unapproved or unverifiable licenses.
+- Filters examples using test results and evaluation scores.
+- Saves a collection manifest.
 
 This script does NOT train the neural network.
 """
@@ -26,6 +32,48 @@ ALLOWED_LICENSES = {
     "bsd-3-clause",
     "cdla-permissive-2.0",
 }
+
+
+def verify_dataset_license(dataset_id, requested_license):
+    """
+    Verifies the dataset license against Hugging Face metadata.
+    Fails closed if the license cannot be confirmed.
+    """
+    from huggingface_hub import HfApi
+
+    info = HfApi().dataset_info(dataset_id)
+
+    card_data = info.card_data
+
+    actual_license = (
+        getattr(card_data, "license", None)
+        if card_data else None
+    )
+
+    if not actual_license:
+        raise ValueError(
+            "Could not verify the dataset license "
+            "from Hugging Face metadata."
+        )
+
+    actual_license = actual_license.lower().strip()
+    requested_license = requested_license.lower().strip()
+
+    if actual_license not in ALLOWED_LICENSES:
+        raise ValueError(
+            f"Dataset license is not approved: {actual_license}"
+        )
+
+    if requested_license != actual_license:
+        raise ValueError(
+            "License mismatch! "
+            f"Requested: {requested_license} | "
+            f"Actual: {actual_license}"
+        )
+
+    print("Verified license:", actual_license)
+
+    return actual_license
 
 
 def normalize_text(value):
@@ -64,9 +112,17 @@ def get_test_status(record):
     if not isinstance(statuses, list):
         return None
 
-    return all(
-        str(status).strip().lower() == "pass"
+    normalized = [
+        str(status).strip().lower()
         for status in statuses
+    ]
+
+    if not normalized:
+        return None
+
+    return all(
+        status == "pass"
+        for status in normalized
     )
 
 
@@ -139,11 +195,10 @@ def collect_dataset(
     min_test_score,
     max_chars
 ):
-    if license_name not in ALLOWED_LICENSES:
-        raise ValueError(
-            "License not in the approved list. "
-            "Verify the dataset license first."
-        )
+    license_name = verify_dataset_license(
+        dataset_id,
+        license_name
+    )
 
     if max_examples < 1 or max_scan < 1:
         raise ValueError(
@@ -153,6 +208,11 @@ def collect_dataset(
     if max_chars < 100:
         raise ValueError(
             "Maximum sample size is too small."
+        )
+
+    if not 0 <= min_test_score <= 1:
+        raise ValueError(
+            "Minimum test score must be between 0 and 1."
         )
 
     try:
@@ -208,13 +268,13 @@ def collect_dataset(
             test_status = get_test_status(record)
 
             if (
-                score is not None
-                and score < min_test_score
+                score is None
+                or score < min_test_score
             ):
                 rejected += 1
                 continue
 
-            if test_status is False:
+            if test_status is not True:
                 rejected += 1
                 continue
 
@@ -256,6 +316,7 @@ def collect_dataset(
 
     report = {
         "project": "EVO AI",
+        "collector_version": "0.2.0",
         "dataset": dataset_id,
         "source_url": (
             "https://huggingface.co/datasets/"
@@ -272,7 +333,9 @@ def collect_dataset(
         "minimum_test_score": min_test_score,
         "output": str(output),
         "note": (
-            "Verify dataset terms and attribution "
+            "Dataset license was checked against "
+            "Hugging Face metadata. Verify attribution, "
+            "dataset terms and third-party content "
             "before redistribution."
         )
     }
@@ -290,6 +353,7 @@ def collect_dataset(
     print("Accepted:", accepted)
     print("Scanned:", scanned)
     print("Rejected:", rejected)
+    print("Verified license:", license_name)
     print("Dataset file:", output)
     print("Manifest:", manifest)
 
