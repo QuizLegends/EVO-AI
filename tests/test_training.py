@@ -1,9 +1,9 @@
 
 """
 EVO AI - Training Integration Test
-Version: 0.1.0
+Version: 0.2.0
 
-Verifies that a real training step updates model weights
+Verifies that actual training updates model weights
 and produces a valid checkpoint.
 """
 
@@ -30,26 +30,31 @@ class TestTrainingIntegration(unittest.TestCase):
             checkpoint_path = root / "evo_test.pt"
 
             data_path.write_text(
-                (
-                    "EVO AI learns programming and language. "
-                    "Neural networks learn patterns from data. "
-                    "Training updates model parameters. "
-                ) * 10,
+                """TASK: PROGRAMMING PROBLEM
+Write a Python function that adds two numbers.
+def add(a, b):
+    return a + b
+
+TASK: PROGRAMMING PROBLEM
+Write a Python function that multiplies two numbers.
+def multiply(a, b):
+    return a * b
+""",
                 encoding="utf-8"
             )
 
             seed = 42
+            block_size = 256
 
             config = EVOConfig(
                 vocab_size=256,
-                max_seq_len=4,
+                max_seq_len=block_size,
                 d_model=8,
                 n_heads=2,
                 n_layers=1,
                 dropout=0.0
             )
 
-            # Save the initial weights for comparison.
             set_seed(seed)
 
             initial_model = EVONeuralCore(config)
@@ -67,24 +72,24 @@ class TestTrainingIntegration(unittest.TestCase):
                 data=str(data_path),
                 output=str(checkpoint_path),
                 epochs=1,
-                batch_size=2,
-                block_size=4,
+                batch_size=1,
+                block_size=block_size,
+                gradient_accumulation_steps=1,
+                no_mixed_precision=True,
                 d_model=8,
                 n_heads=2,
                 n_layers=1,
                 dropout=0.0,
                 learning_rate=0.001,
-                validation_split=0.2
+                validation_split=0.5
             )
 
-            # Execute actual training.
             train(args)
 
             self.assertTrue(
                 checkpoint_path.is_file()
             )
 
-            # Load the checkpoint.
             checkpoint = torch.load(
                 checkpoint_path,
                 map_location="cpu",
@@ -100,7 +105,6 @@ class TestTrainingIntegration(unittest.TestCase):
                 "model_state_dict"
             ]
 
-            # Confirm that at least one parameter changed.
             changed_parameters = [
                 name
                 for name, initial in initial_weights.items()
@@ -125,3 +129,4 @@ class TestTrainingIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
