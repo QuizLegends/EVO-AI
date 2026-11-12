@@ -1,16 +1,18 @@
+
 """
 EVO AI - Training Engine
-Version: 0.2.0
+Version: 0.3.0
 
 Trains the neural model from randomly initialized weights.
 
 Features:
 - Independent programming examples.
 - Variable-length batch support.
+- Explicit padding masks.
 - Padding ignored during loss calculation.
-- Gradient accumulation.
-- Optional CUDA mixed precision.
+- Token-weighted gradient accumulation.
 - Token-weighted validation loss.
+- Optional CUDA mixed precision.
 - Reproducible train/validation split.
 """
 
@@ -43,8 +45,14 @@ def collate_examples(batch):
     """
     Pads variable-length examples.
 
-    Padding targets use IGNORE_INDEX so they do not
-    contribute to the training loss.
+    Returns:
+        input_ids_batch
+        targets_batch
+        padding_mask
+
+    padding_mask:
+        False = real token
+        True = padding
     """
 
     max_length = max(
@@ -65,6 +73,11 @@ def collate_examples(batch):
         dtype=torch.long
     )
 
+    padding_mask = torch.ones(
+        (batch_size, max_length),
+        dtype=torch.bool
+    )
+
     for index, (input_ids, targets) in enumerate(batch):
 
         length = len(input_ids)
@@ -72,7 +85,13 @@ def collate_examples(batch):
         input_ids_batch[index, :length] = input_ids
         targets_batch[index, :length] = targets
 
-    return input_ids_batch, targets_batch
+        padding_mask[index, :length] = False
+
+    return (
+        input_ids_batch,
+        targets_batch,
+        padding_mask
+    )
 
 
 def save_checkpoint(
@@ -120,14 +139,18 @@ def evaluate(
 
     with torch.no_grad():
 
-        for input_ids, targets in loader:
+        for input_ids, targets, padding_mask in loader:
 
             input_ids = input_ids.to(device)
             targets = targets.to(device)
+            padding_mask = padding_mask.to(device)
 
             valid_tokens = (
                 targets != IGNORE_INDEX
             ).sum().item()
+
+            if valid_tokens == 0:
+                continue
 
             with torch.amp.autocast(
                 device_type=device.type,
@@ -137,7 +160,8 @@ def evaluate(
 
                 logits, _ = model(
                     input_ids,
-                    targets
+                    targets,
+                    padding_mask=padding_mask
                 )
 
                 loss_sum = F.cross_entropy(
@@ -267,9 +291,13 @@ def train(args):
         total_train_loss = 0.0
         total_train_tokens = 0
 
-        for step, (input_ids, targets) in enumerate(
-            train_loader
-        ):
+        group_tokens = 0
+
+        for step, (
+            input_ids,
+            targets,
+            padding_mask
+        ) in enumerate(train_loader):
 
             input_ids = input_ids.to(
                 device,
@@ -281,6 +309,11 @@ def train(args):
                 non_blocking=True
             )
 
+            padding_mask = padding_mask.to(
+                device,
+                non_blocking=True
+            )
+
             valid_tokens = (
                 targets != IGNORE_INDEX
             ).sum().item()
@@ -288,14 +321,7 @@ def train(args):
             if valid_tokens == 0:
                 continue
 
-            group_start = (
-                step // args.gradient_accumulation_steps
-            ) * args.gradient_accumulation_steps
-
-            group_size = min(
-                args.gradient_accumulation_steps,
-                len(train_loader) - group_start
-            )
+            group_tokens += valid_tokens
 
             with torch.amp.autocast(
                 device_type=device.type,
@@ -303,19 +329,25 @@ def train(args):
                 enabled=use_amp
             ):
 
-                _, loss = model(
+                logits, _ = model(
                     input_ids,
-                    targets
+                    targets,
+                    padding_mask=padding_mask
                 )
 
-                scaled_loss = loss / group_size
+                loss_sum = F.cross_entropy(
+                    logits.reshape(
+                        -1,
+                        model.config.vocab_size
+                    ),
+                    targets.reshape(-1),
+                    ignore_index=IGNORE_INDEX,
+                    reduction="sum"
+                )
 
-            scaler.scale(scaled_loss).backward()
+            scaler.scale(loss_sum).backward()
 
-            total_train_loss += (
-                loss.detach().item() * valid_tokens
-            )
-
+            total_train_loss += loss_sum.detach().item()
             total_train_tokens += valid_tokens
 
             is_accumulation_step = (
@@ -329,7 +361,19 @@ def train(args):
 
             if is_accumulation_step or is_last_step:
 
+                if group_tokens == 0:
+                    raise ValueError(
+                        "Gradient accumulation group has no valid tokens."
+                    )
+
                 scaler.unscale_(optimizer)
+
+                # Convert accumulated gradient sums
+                # into a token-weighted average.
+                for parameter in model.parameters():
+
+                    if parameter.grad is not None:
+                        parameter.grad.div_(group_tokens)
 
                 torch.nn.utils.clip_grad_norm_(
                     model.parameters(),
@@ -342,6 +386,8 @@ def train(args):
                 optimizer.zero_grad(
                     set_to_none=True
                 )
+
+                group_tokens = 0
 
         if total_train_tokens == 0:
             raise ValueError(
@@ -393,7 +439,7 @@ def main():
     parser.add_argument(
         "--output",
         type=str,
-        default="checkpoints/evo_v0.2.pt"
+        default="checkpoints/evo_v0.4.pt"
     )
 
     parser.add_argument(
