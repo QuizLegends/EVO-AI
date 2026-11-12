@@ -1,0 +1,382 @@
+
+EVO AI - PROGRAMMING KNOWLEDGE DATASET
+VERSION: 0.1
+PURPOSE: SOFTWARE ENGINEERING AND CODE INTELLIGENCE
+
+==================================================
+TASK: EXPLAIN CODE
+LANGUAGE: PYTHON
+==================================================
+
+PROBLEM:
+Explain what the following Python function does.
+
+CODE:
+def calculate_average(numbers):
+    if not numbers:
+        return 0
+    return sum(numbers) / len(numbers)
+
+ANALYSIS:
+The function receives a collection of numbers.
+It checks whether the collection is empty.
+If it is empty, it returns zero.
+Otherwise, it calculates the sum and divides it by the number of elements.
+
+SOLUTION:
+The function calculates the arithmetic mean of a list of numbers.
+Its time complexity is O(n), where n is the number of elements.
+
+==================================================
+TASK: DEBUG CODE
+LANGUAGE: PYTHON
+==================================================
+
+PROBLEM:
+Identify the error in this function.
+
+CODE:
+def calculate_total(values):
+    total = 0
+    for value in values:
+        total += values
+    return total
+
+ANALYSIS:
+The variable value contains the current element.
+However, the code attempts to add the entire collection values to total.
+This causes a TypeError when values is a list.
+
+CORRECTION:
+def calculate_total(values):
+    total = 0
+    for value in values:
+        total += value
+    return total
+
+TEST:
+assert calculate_total([2, 3, 5]) == 10
+
+EXPECTED_RESULT:
+The test passes and the function returns 10.
+
+==================================================
+TASK: CREATE FUNCTION
+LANGUAGE: PYTHON
+==================================================
+
+PROBLEM:
+Create a function that checks whether an integer is prime.
+
+SOLUTION:
+def is_prime(number):
+    if number < 2:
+        return False
+
+    for divisor in range(2, int(number ** 0.5) + 1):
+        if number % divisor == 0:
+            return False
+
+    return True
+
+TESTS:
+assert is_prime(2) is True
+assert is_prime(7) is True
+assert is_prime(9) is False
+assert is_prime(1) is False
+
+ANALYSIS:
+A prime number has exactly two positive divisors.
+Checking divisors up to the square root is sufficient.
+The time complexity is O(sqrt(n)).
+
+==================================================
+TASK: MODIFY EXISTING CODE
+LANGUAGE: PYTHON
+==================================================
+
+PROBLEM:
+Modify the function to ignore negative numbers without changing the original list.
+
+ORIGINAL CODE:
+def calculate_total(numbers):
+    return sum(numbers)
+
+SOLUTION:
+def calculate_total(numbers):
+    return sum(number for number in numbers if number >= 0)
+
+TEST:
+values = [-5, 10, 20, -2]
+assert calculate_total(values) == 30
+assert values == [-5, 10, 20, -2]
+
+ANALYSIS:
+The generator expression filters negative values.
+The original list remains unchanged.
+
+==================================================
+TASK: EXPLAIN CODE
+LANGUAGE: JAVASCRIPT
+==================================================
+
+PROBLEM:
+Explain the purpose of this function.
+
+CODE:
+function findUser(users, id) {
+    return users.find(user => user.id === id);
+}
+
+ANALYSIS:
+The find method searches an array.
+It returns the first element whose id matches the requested id.
+If no element matches, it returns undefined.
+
+COMPLEXITY:
+The worst-case time complexity is O(n).
+
+==================================================
+TASK: DEBUG CODE
+LANGUAGE: JAVASCRIPT
+==================================================
+
+PROBLEM:
+Find and correct the error.
+
+CODE:
+const numbers = [1, 2, 3];
+numbers.push(4);
+numbers = [5, 6];
+
+ANALYSIS:
+The variable numbers was declared with const.
+A const variable cannot be reassigned.
+However, its array contents can be modified.
+
+CORRECTION:
+const numbers = [1, 2, 3];
+numbers.push(4);
+
+TEST:
+console.assert(numbers.length === 4);
+
+==================================================
+TASK: CREATE HTML STRUCTURE
+LANGUAGE: HTML
+==================================================
+
+PROBLEM:
+Create an accessible login form.
+
+SOLUTION:
+<form action="/login" method="post">
+    <label for="email">Email</label>
+    <input
+        type="email"
+        id="email"
+        name="email"
+        required
+    >
+
+    <label for="password">Password</label>
+    <input
+        type="password"
+        id="password"
+        name="password"
+        required
+    >
+
+    <button type="submit">Sign in</button>
+</form>
+
+ANALYSIS:
+Labels connect descriptive text to form controls.
+The required attribute enforces browser-side validation.
+The server must still validate credentials and input.
+
+==================================================
+TASK: CREATE CSS
+LANGUAGE: CSS
+==================================================
+
+PROBLEM:
+Create a responsive card that adapts to smaller screens.
+
+SOLUTION:
+.card {
+    width: min(100% - 32px, 500px);
+    margin: 20px auto;
+    padding: 20px;
+    border-radius: 12px;
+    box-sizing: border-box;
+}
+
+ANALYSIS:
+The min function limits the card width.
+Automatic horizontal margins center the card.
+Box sizing includes padding in the declared width.
+
+==================================================
+TASK: ALGORITHM ANALYSIS
+LANGUAGE: PYTHON
+==================================================
+
+PROBLEM:
+Find the largest number in a list without using max().
+
+SOLUTION:
+def find_largest(numbers):
+    if not numbers:
+        raise ValueError("List cannot be empty")
+
+    largest = numbers[0]
+
+    for number in numbers[1:]:
+        if number > largest:
+            largest = number
+
+    return largest
+
+TEST:
+assert find_largest([4, 9, 2, 15, 7]) == 15
+
+ANALYSIS:
+The algorithm visits each element once.
+Time complexity: O(n).
+Auxiliary space complexity: O(1).
+
+==================================================
+TASK: DATA STRUCTURES
+LANGUAGE: PYTHON
+==================================================
+
+PROBLEM:
+Explain the difference between a list and a dictionary.
+
+ANALYSIS:
+A list stores ordered elements accessed primarily by position.
+A dictionary stores key-value pairs accessed by keys.
+
+EXAMPLE:
+users = ["Ana", "Pedro", "Lucas"]
+
+user = {
+    "name": "Ana",
+    "age": 25
+}
+
+A list is useful for sequences of elements.
+A dictionary is useful for structured data and key-based lookup.
+
+==================================================
+TASK: DATABASE QUERY
+LANGUAGE: SQL
+==================================================
+
+PROBLEM:
+Select active users older than 18, ordered by name.
+
+SOLUTION:
+SELECT id, name, age
+FROM users
+WHERE active = TRUE
+AND age > 18
+ORDER BY name ASC;
+
+ANALYSIS:
+SELECT specifies the requested columns.
+WHERE filters records.
+ORDER BY sorts the result alphabetically.
+
+==================================================
+TASK: CODE OPTIMIZATION
+LANGUAGE: PYTHON
+==================================================
+
+PROBLEM:
+Improve membership checking when searching many values.
+
+LESS EFFICIENT CODE:
+allowed = [10, 20, 30, 40, 50]
+
+if 30 in allowed:
+    print("Found")
+
+IMPROVED CODE:
+allowed = {10, 20, 30, 40, 50}
+
+if 30 in allowed:
+    print("Found")
+
+ANALYSIS:
+List membership requires O(n) time in the worst case.
+Set membership has average O(1) lookup time.
+A set is preferable when many membership checks are required.
+
+==================================================
+TASK: SOFTWARE TESTING
+LANGUAGE: PYTHON
+==================================================
+
+PROBLEM:
+Create tests for a function that adds two numbers.
+
+FUNCTION:
+def add(a, b):
+    return a + b
+
+TESTS:
+def test_add():
+    assert add(2, 3) == 5
+    assert add(-2, 2) == 0
+    assert add(0, 0) == 0
+
+ANALYSIS:
+Tests verify expected behavior.
+Multiple test cases help detect errors involving different inputs.
+A successful test suite does not prove that every possible input is correct.
+
+==================================================
+TASK: ERROR ANALYSIS
+LANGUAGE: GENERAL PROGRAMMING
+==================================================
+
+PROBLEM:
+A program produces an unexpected result.
+
+ANALYSIS PROCEDURE:
+1. Reproduce the error.
+2. Identify the expected result.
+3. Identify the actual result.
+4. Inspect the relevant code.
+5. Check input types and values.
+6. Locate the cause.
+7. Propose the smallest appropriate correction.
+8. Execute tests after the correction.
+9. Verify that existing functionality still works.
+
+IMPORTANT:
+Do not assume the first suspicious line is necessarily the cause.
+Distinguish symptoms from root causes.
+
+==================================================
+TASK: SAFE CODE EXECUTION
+LANGUAGE: GENERAL PROGRAMMING
+==================================================
+
+PROBLEM:
+Explain how an AI programming assistant should execute untrusted code.
+
+SOLUTION:
+Untrusted code should run inside an isolated environment.
+The environment should have restricted permissions, limited CPU and memory, execution timeouts, and controlled filesystem access.
+Network access should be disabled unless explicitly required and authorized.
+The execution result should be captured and evaluated separately.
+
+IMPORTANT:
+Never execute untrusted code directly on the host environment.
+
+==================================================
+END OF DATASET
+==================================================
